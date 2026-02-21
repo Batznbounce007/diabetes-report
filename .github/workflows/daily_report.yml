@@ -101,4 +101,12 @@ jobs:
           fi
 
       - name: Run daily report
-        run: python src/daily_report.py
+        run: |
+          set -o pipefail
+          python src/daily_report.py 2>&1 | tee /tmp/daily_report.log
+          status="${PIPESTATUS[0]}"
+          if [ "$status" -ne 0 ]; then
+            last_line="$(tail -n 1 /tmp/daily_report.log | tr -d '\r')"
+            echo "::error::daily_report.py failed: ${last_line}"
+            exit "$status"
+          fi
