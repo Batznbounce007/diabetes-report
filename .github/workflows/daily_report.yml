@@ -64,8 +64,9 @@ jobs:
       - name: Verify Nightscout API access
         run: |
           set -e
+          api_hash="$(printf '%s' "$NIGHTSCOUT_API_SECRET" | sha1sum | awk '{print $1}')"
           code="$(curl -sS -o /tmp/ns_probe.json -w "%{http_code}" \
-            -H "api-secret: $NIGHTSCOUT_API_SECRET" \
+            -H "api-secret: $api_hash" \
             "$NIGHTSCOUT_URL/api/v1/entries.json?count=1" || true)"
           echo "Nightscout API probe status: $code"
           if [ "$code" != "200" ]; then

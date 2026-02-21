@@ -3,6 +3,7 @@ import json
 import math
 import os
 import time
+import hashlib
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -46,7 +47,8 @@ def load_config() -> Config:
 def ns_headers(cfg: Config) -> dict:
     headers = {"Accept": "application/json"}
     if cfg.nightscout_api_secret:
-        headers["api-secret"] = cfg.nightscout_api_secret
+        secret_hash = hashlib.sha1(cfg.nightscout_api_secret.encode("utf-8")).hexdigest()
+        headers["api-secret"] = secret_hash
     return headers
 
 
