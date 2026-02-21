@@ -61,5 +61,43 @@ jobs:
           echo "::error::Nightscout status endpoint is not reachable after retries"
           exit 1
 
+      - name: Verify Nightscout API access
+        run: |
+          set -e
+          code="$(curl -sS -o /tmp/ns_probe.json -w "%{http_code}" \
+            -H "api-secret: $NIGHTSCOUT_API_SECRET" \
+            "$NIGHTSCOUT_URL/api/v1/entries.json?count=1" || true)"
+          echo "Nightscout API probe status: $code"
+          if [ "$code" != "200" ]; then
+            echo "::error::Nightscout API probe failed (HTTP $code). Check NIGHTSCOUT_URL/NIGHTSCOUT_API_SECRET."
+            head -c 400 /tmp/ns_probe.json || true
+            echo
+            exit 1
+          fi
+
+      - name: Verify Telegram bot and chat
+        run: |
+          set -e
+          bot_code="$(curl -sS -o /tmp/tg_bot.json -w "%{http_code}" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getMe" || true)"
+          echo "Telegram bot probe status: $bot_code"
+          if [ "$bot_code" != "200" ] || ! grep -q '"ok":true' /tmp/tg_bot.json; then
+            echo "::error::Telegram bot token invalid. Check TELEGRAM_BOT_TOKEN."
+            head -c 400 /tmp/tg_bot.json || true
+            echo
+            exit 1
+          fi
+
+          chat_code="$(curl -sS -G -o /tmp/tg_chat.json -w "%{http_code}" \
+            --data-urlencode "chat_id=${TELEGRAM_CHAT_ID}" \
+            "https://api.telegram.org/bot${TELEGRAM_BOT_TOKEN}/getChat" || true)"
+          echo "Telegram chat probe status: $chat_code"
+          if [ "$chat_code" != "200" ] || ! grep -q '"ok":true' /tmp/tg_chat.json; then
+            echo "::error::Telegram chat check failed. Check TELEGRAM_CHAT_ID and ensure you started the bot chat."
+            head -c 400 /tmp/tg_chat.json || true
+            echo
+            exit 1
+          fi
+
       - name: Run daily report
         run: python src/daily_report.py
