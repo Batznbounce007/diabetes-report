@@ -274,7 +274,12 @@ def run() -> None:
 
     sgv_entries = fetch_sgv(cfg, start_ms, end_ms)
     sgv_values = [float(x["sgv"]) for x in sorted(sgv_entries, key=lambda i: i.get("date", 0))]
-    treatments = fetch_treatments(cfg, start_iso, end_iso)
+    try:
+        treatments = fetch_treatments(cfg, start_iso, end_iso)
+    except requests.RequestException as exc:
+        # Some Nightscout setups restrict treatments. Keep report running with SGV-only KPIs.
+        print(f"Warning: treatments fetch failed ({type(exc).__name__}); continuing without treatments.")
+        treatments = []
 
     metrics, recs = analyze(sgv_values, treatments)
     msg = build_message(start, metrics, recs)
