@@ -1,6 +1,13 @@
 name: Daily Diabetes Report
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - ".github/workflows/daily_report.yml"
+      - "src/**"
+      - "requirements.txt"
   schedule:
     - cron: "5 6 * * *" # 07:05 Europe/Berlin in winter; adjust if needed
   workflow_dispatch:
