@@ -8,6 +8,12 @@ on:
 jobs:
   report:
     runs-on: ubuntu-latest
+    env:
+      NIGHTSCOUT_URL: ${{ secrets.NIGHTSCOUT_URL }}
+      NIGHTSCOUT_API_SECRET: ${{ secrets.NIGHTSCOUT_API_SECRET }}
+      TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+      TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
+      TZ: ${{ secrets.TZ }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -20,11 +26,33 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Validate required secrets
+        run: |
+          set -e
+          missing=0
+          for key in NIGHTSCOUT_URL NIGHTSCOUT_API_SECRET TELEGRAM_BOT_TOKEN TELEGRAM_CHAT_ID TZ; do
+            if [ -z "${!key}" ]; then
+              echo "::error::Missing required secret/env: $key"
+              missing=1
+            fi
+          done
+          if [ "$missing" -ne 0 ]; then
+            exit 1
+          fi
+
+      - name: Warm up Nightscout endpoint
+        run: |
+          set -e
+          for i in $(seq 1 12); do
+            code="$(curl -sS -o /dev/null -w "%{http_code}" "$NIGHTSCOUT_URL/api/v1/status.json" || true)"
+            echo "Attempt $i/12: status=$code"
+            if [ "$code" = "200" ] || [ "$code" = "401" ] || [ "$code" = "403" ]; then
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Nightscout status endpoint is not reachable after retries"
+          exit 1
+
       - name: Run daily report
-        env:
-          NIGHTSCOUT_URL: ${{ secrets.NIGHTSCOUT_URL }}
-          NIGHTSCOUT_API_SECRET: ${{ secrets.NIGHTSCOUT_API_SECRET }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID: ${{ secrets.TELEGRAM_CHAT_ID }}
-          TZ: ${{ secrets.TZ }}
         run: python src/daily_report.py

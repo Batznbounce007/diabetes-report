@@ -2,6 +2,7 @@
 import json
 import math
 import os
+import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
@@ -16,6 +17,9 @@ class Config:
     telegram_bot_token: str
     telegram_chat_id: str
     timezone: str
+
+
+TRANSIENT_HTTP_CODES = {429, 500, 502, 503, 504}
 
 
 def load_config() -> Config:
@@ -46,6 +50,55 @@ def ns_headers(cfg: Config) -> dict:
     return headers
 
 
+def request_with_retry(
+    method: str,
+    url: str,
+    *,
+    headers: dict | None = None,
+    params: dict | None = None,
+    json_body: dict | None = None,
+    timeout: int = 30,
+    retries: int = 8,
+    base_delay: int = 5,
+) -> requests.Response:
+    last_error: Exception | None = None
+    for attempt in range(1, retries + 1):
+        try:
+            resp = requests.request(
+                method=method,
+                url=url,
+                headers=headers,
+                params=params,
+                json=json_body,
+                timeout=timeout,
+            )
+            if resp.status_code in TRANSIENT_HTTP_CODES and attempt < retries:
+                wait_s = min(base_delay * attempt, 30)
+                print(
+                    f"[retry {attempt}/{retries}] {method} {url} returned "
+                    f"{resp.status_code}, waiting {wait_s}s"
+                )
+                time.sleep(wait_s)
+                continue
+            resp.raise_for_status()
+            return resp
+        except (requests.ConnectionError, requests.Timeout) as exc:
+            last_error = exc
+            if attempt >= retries:
+                raise
+            wait_s = min(base_delay * attempt, 30)
+            print(
+                f"[retry {attempt}/{retries}] {method} {url} network error "
+                f"({type(exc).__name__}), waiting {wait_s}s"
+            )
+            time.sleep(wait_s)
+        except requests.HTTPError as exc:
+            # Non-transient HTTP errors fail fast, others are handled above.
+            last_error = exc
+            raise
+    raise RuntimeError(f"HTTP request failed after retries: {method} {url}") from last_error
+
+
 def fetch_sgv(cfg: Config, start_ms: int, end_ms: int) -> list[dict]:
     query = {
         "date": {"$gte": start_ms, "$lt": end_ms},
@@ -56,8 +109,7 @@ def fetch_sgv(cfg: Config, start_ms: int, end_ms: int) -> list[dict]:
         "count": "10000",
     }
     url = f"{cfg.nightscout_url}/api/v1/entries.json"
-    resp = requests.get(url, params=params, headers=ns_headers(cfg), timeout=30)
-    resp.raise_for_status()
+    resp = request_with_retry("GET", url, params=params, headers=ns_headers(cfg))
     data = resp.json()
     return [d for d in data if isinstance(d.get("sgv"), (int, float))]
 
@@ -71,8 +123,7 @@ def fetch_treatments(cfg: Config, start_iso: str, end_iso: str) -> list[dict]:
         "count": "5000",
     }
     url = f"{cfg.nightscout_url}/api/v1/treatments.json"
-    resp = requests.get(url, params=params, headers=ns_headers(cfg), timeout=30)
-    resp.raise_for_status()
+    resp = request_with_retry("GET", url, params=params, headers=ns_headers(cfg))
     return resp.json()
 
 
@@ -202,8 +253,7 @@ def send_telegram(cfg: Config, text: str) -> None:
         "chat_id": cfg.telegram_chat_id,
         "text": text,
     }
-    resp = requests.post(url, json=payload, timeout=30)
-    resp.raise_for_status()
+    request_with_retry("POST", url, json_body=payload)
 
 
 def run() -> None:
